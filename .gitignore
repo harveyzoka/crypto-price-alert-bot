@@ -1,0 +1,11 @@
+# secrets & runtime
+.env
+alerts.json
+*.log
+
+# python cache & env
+__pycache__/
+*.pyc
+.venv/
+.venv*/
+.env.*/

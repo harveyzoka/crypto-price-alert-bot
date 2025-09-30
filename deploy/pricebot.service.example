@@ -1,0 +1,14 @@
+[Unit]
+Description=Telegram Price Alert Bot (multi-source)
+After=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/pricebot
+EnvironmentFile=/home/ubuntu/pricebot/.env
+ExecStart=/home/ubuntu/pricebot/.venv/bin/python /home/ubuntu/pricebot/price_alert_bot_multi.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
