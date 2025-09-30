@@ -383,7 +383,11 @@ async def price_job(context: ContextTypes.DEFAULT_TYPE):
                 a["last_fired"] = now
                 save_data(data)
                 text = f"🚨 {a['display']} {a['op']} {a['value']} — Giá: {price}"
-                await send_burst(context.bot, int(chat_id), text, a["id"])
+                # chạy burst ở background, job kết thúc sớm → không bị chồng phiên
+                context.application.create_task(
+                    send_burst(context.bot, int(chat_id), text, a["id"])
+                )
+
 
     save_data(data)
 
@@ -437,7 +441,14 @@ def main():
         jq = JobQueue(); jq.set_application(app); jq.start()
         jq.run_repeating(price_job, interval=CHECK_INTERVAL_SEC, first=3)
     else:
-        app.job_queue.run_repeating(price_job, interval=CHECK_INTERVAL_SEC, first=3)
+        app.job_queue.run_repeating(
+            price_job,
+            interval=CHECK_INTERVAL_SEC,
+            first=3,
+            name="price_job",
+            job_kwargs={"max_instances": 5, "coalesce": True, "misfire_grace_time": 10}
+        )
+
 
     app.run_polling()
 
