@@ -1,8 +1,9 @@
 ﻿---
 
-# Telegram Price Alert Bot (Multi-Source)
+# Telegram Price Alert Bot (Multi-Exchange)
 
-A lightweight Telegram bot for crypto price alerts. It resolves assets across **Binance → Bybit → CoinGecko**, polls on a fixed interval, and when a threshold hits it sends a **burst** of messages (10 messages, 2s apart) and **repeats every 30s** until you **ACK** (confirm) in chat. Works in DMs or groups. Alerts are stored **per chat**. Includes **hysteresis** to avoid noisy triggers. Secrets live in `.env` (not committed).
+A lightweight Telegram bot for crypto price alerts across **Binance → Bybit → MEXC → KuCoin → OKX**.
+It polls at a fixed interval and, when a threshold is hit, sends a **burst** of messages (**10 msgs, 2s apart**) and **repeats every 30s** until you **ACK** in chat. Works in DMs or groups, stores alerts **per chat**, includes **hysteresis** to avoid noisy triggers, and uses a small **price cache** to reduce API calls.
 
 > **No secrets in Git:** keep your real token in `.env`. Commit only `.env.example`.
 
@@ -10,23 +11,30 @@ A lightweight Telegram bot for crypto price alerts. It resolves assets across **
 
 ## ✨ Features
 
-* Multi-source price resolution: Binance, Bybit, CoinGecko (automatic fallback).
-* Clean commands:
+* **Multi-exchange** price resolution (automatic fallback):
 
-  * `/price <asset>` — quick price (e.g., `BTCUSDT`, `binance:EDENUSDT`, `cg:openeden`)
+  1. Binance (REST)
+  2. Bybit (REST)
+  3. MEXC (REST)
+  4. KuCoin (REST)
+  5. OKX (REST)
+* Commands:
+
+  * `/price <asset>` — quick price
+    e.g. `BTCUSDT`, `binance:EDENUSDT`, `kucoin:EDEN-USDT`, `okx:BTC-USDT`
   * `/add <asset> >=|<= <price>` — create an alert
-  * `/list` `/remove <id>` `/removeall`
-  * `/find <query>` — find CoinGecko IDs
-  * `/ack <id>` — acknowledge alert (stop repeats)
+  * `/list`, `/remove <id>`, `/removeall`
+  * `/ack <id>` — acknowledge alert (stops repeat bursts)
   * `/id`, `/ping`, `/help`
 * **Burst alerts**: 10 messages per burst, 2 seconds apart; **re-burst every 30s** if not ACKed.
 * **Hysteresis** (`REARM_GAP_PCT`) to prevent rapid toggling around thresholds.
-* Per-chat storage (DMs and groups each have independent alert lists).
-* Auto-migration from older alert formats.
+* **Per-chat storage** (DMs and groups each have independent alert lists).
+* **Price cache** (`PRICE_CACHE_TTL`) to reduce API usage.
+* Job queue tuned to avoid “skipped” runs (burst is sent in background tasks).
 
 ---
 
-## 📁 Suggested Repo Layout
+## 🧱 Suggested Repo Layout
 
 ```
 price-alert-bot/
@@ -82,16 +90,16 @@ python-dotenv
 
 ## ⚙️ Configuration
 
-Create a `.env` next to the script. **Do not commit** your real `.env`. Use `.env.example` as a template.
+Create a `.env` next to the script. **Do not commit** your real `.env`.
 
 **`.env.example`**
 
 ```dotenv
-# === Telegram Price Alert Bot (.env) ===
+# === Telegram Price Alert Bot (.env) — No CoinGecko ===
 BOT_TOKEN=PUT_YOUR_TOKEN_HERE
 
 # Poll interval (seconds)
-CHECK_INTERVAL_SEC=10
+CHECK_INTERVAL_SEC=20
 
 # “Decisive” alerting: 10 messages per burst, 2s apart; repeat every 30s if not ACKed
 ALARM_REPEAT=10
@@ -100,6 +108,9 @@ ALARM_COOLDOWN_SEC=30
 
 # Hysteresis to re-arm (reduce false triggers around threshold). 0.002 = 0.2%
 REARM_GAP_PCT=0.002
+
+# Price cache TTL (seconds) to reduce API calls
+PRICE_CACHE_TTL=120
 
 # (Optional) Restrict bot usage to these chat IDs (DMs or groups, comma-separated)
 # ALLOWED_CHAT_IDS=123456789,-1001234567890
@@ -144,7 +155,7 @@ python price_alert_bot_multi.py   # test foreground (Ctrl+C to stop)
 
 ```ini
 [Unit]
-Description=Telegram Price Alert Bot (multi-source)
+Description=Telegram Price Alert Bot (multi-exchange)
 After=network-online.target
 
 [Service]
@@ -185,25 +196,28 @@ sudo systemctl restart pricebot
 * `/id` – show current chat_id (DM or group)
 * `/ping` – health check
 * `/price <asset>`
-  Examples:
+  **Formats by exchange**
 
+  * **Binance / Bybit / MEXC**: `BASEQUOTE` (no dash), e.g. `BTCUSDT`, `EDENUSDT`
+  * **KuCoin / OKX**: `BASE-QUOTE` (with dash), e.g. `BTC-USDT`, `EDEN-USDT`
+    **Examples**:
   * `/price BTCUSDT`
   * `/price binance:EDENUSDT`
   * `/price bybit:EDENUSDT`
-  * `/price cg:openeden`
-* `/find <query>` — search CoinGecko IDs (e.g., `/find eden`)
+  * `/price mexc:EDENUSDT`
+  * `/price kucoin:EDEN-USDT`
+  * `/price okx:BTC-USDT`
 * `/add <asset> >=|<= <price>`
   Examples:
 
-  * `/add BTCUSDT >= 65000`
-  * `/add binance:EDENUSDT <= 0.47`
-  * `/add cg:openeden >= 0.48`
+  * `/add binance:BTCUSDT >= 65000`
+  * `/add kucoin:EDEN-USDT <= 0.47`
 * `/list` — list alerts in this chat
 * `/remove <id>` — remove by ID
 * `/removeall` — clear all alerts in this chat
 * `/ack <id>` — acknowledge alert (stop repeating bursts)
 
-> No source prefix? The bot tries to normalize (adds USDT/USDC) and checks **Binance → Bybit → CoinGecko** in that order.
+> No prefix? The bot tries to normalize the pair and checks **Binance → Bybit → MEXC → KuCoin → OKX** in that order.
 
 ---
 
@@ -211,7 +225,7 @@ sudo systemctl restart pricebot
 
 1. Add the bot to the group → send `/start` in the group.
 2. (If you enabled `ALLOWED_CHAT_IDS`) run `/id` in the group and add the **negative** group ID (`-100…`) to `.env`.
-3. Create alerts in the group: `/add BTCUSDT >= 60000`. All members see the bursts.
+3. Create alerts in the group: `/add binance:BTCUSDT >= 60000`. All members see the bursts.
 
 ---
 
@@ -226,13 +240,13 @@ The bot sends messages with `disable_notification=False` to avoid silent deliver
   Settings → Telegram → Notifications → **Allow** + Banners **Persistent** + Sound.
   Focus (DND) → add Telegram to **Allowed Apps**; enable **Time-Sensitive** if available.
 
-If the group is set to “Mentions only”, change to **All messages** or rely on device settings to allow Telegram alerts.
+If the group is set to “Mentions only”, change to **All messages** or adjust device settings.
 
 ---
 
 ## 📶 Data Usage
 
-Typical REST ticker responses are small (~0.5–2 KB). The bot groups requests by `(source, symbol)` per cycle, so daily usage is roughly:
+Approximation (small REST JSON responses ~0.5–2 KB). The bot groups requests per unique `(source, symbol)` per cycle:
 
 ```
 MB/day ≈ (86,400 / CHECK_INTERVAL_SEC) × unique_pairs × (kB_per_req) / 1024
@@ -240,23 +254,23 @@ MB/day ≈ (86,400 / CHECK_INTERVAL_SEC) × unique_pairs × (kB_per_req) / 1024
 
 Examples (1.2 kB/req):
 
-* 3 pairs @ 10s → ~30 MB/day
+* 3 pairs @ 20s → ~15 MB/day
 * 10 pairs @ 30s → ~34 MB/day
 
-Increase `CHECK_INTERVAL_SEC` to save bandwidth (20–30s is fine for most alerts).
+Increase `CHECK_INTERVAL_SEC` or `PRICE_CACHE_TTL` to save bandwidth.
 
 ---
 
 ## 🩺 Troubleshooting
 
-* **No phone push but messages appear in chat**:
+* **Symbol format errors**:
+
+  * Binance/Bybit/MEXC: `BTCUSDT` (no dash)
+  * KuCoin/OKX: `BTC-USDT` (with dash)
+* **No push but messages appear in chat**:
   Check device notification settings (Android/iOS) and group mute settings.
-* **`ModuleNotFoundError: dotenv`**:
-  `pip install -r requirements.txt` in your active environment/venv.
 * **PEP 668 (externally-managed environment)**:
   Use a venv: `python3 -m venv .venv && source .venv/bin/activate`.
-* **`KeyError: 'src'` after upgrading**:
-  The bot auto-migrates; if needed, delete old `alerts.json`.
 * **Stop the bot**:
   Foreground: **Ctrl+C**.
   systemd: `sudo systemctl stop pricebot`.
@@ -288,4 +302,4 @@ MIT (or your preferred license).
 
 ---
 
-**Keywords**: `telegram-bot` `crypto` `price-alerts` `binance` `bybit` `coingecko` `python` `asyncio` `job-queue`
+**Keywords**: `telegram-bot` `crypto` `price-alerts` `binance` `bybit` `mexc` `kucoin` `okx` `python` `asyncio` `job-queue`
